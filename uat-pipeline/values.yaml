@@ -180,58 +180,26 @@ internalTelemetryViaOTLP:
 config:
   exporters:
     # OTLP exporter for traces - routes to Service Graph collector
+    # Note: Actual endpoint/auth configuration is injected via templates/_config.tpl
     otlp/servicegraph:
-      endpoint: {{ .Values.downstream.servicegraph.endpoint }}
+      endpoint: "servicegraph-collector.observability.svc.cluster.local:4317"
       tls:
-        insecure: {{ .Values.downstream.servicegraph.tls.insecure }}
-        {{- if .Values.downstream.servicegraph.tls.ca_file }}
-        ca_file: {{ .Values.downstream.servicegraph.tls.ca_file }}
-        {{- end }}
-      {{- if eq .Values.downstream.servicegraph.auth.type "bearer" }}
-      headers:
-        authorization: "Bearer {{ .Values.downstream.servicegraph.auth.bearer.token }}"
-      {{- else if eq .Values.downstream.servicegraph.auth.type "basic" }}
-      headers:
-        authorization: "Basic {{ printf "%s:%s" .Values.downstream.servicegraph.auth.basic.username .Values.downstream.servicegraph.auth.basic.password | b64enc }}"
-      {{- else if eq .Values.downstream.servicegraph.auth.type "apikey" }}
-      headers:
-        {{ .Values.downstream.servicegraph.auth.apikey.key }}: {{ .Values.downstream.servicegraph.auth.apikey.value }}
-      {{- end }}
+        insecure: true
 
     # OTLP exporter for logs - routes to logs collector
     otlp/logs:
-      endpoint: {{ .Values.downstream.logs.endpoint }}
+      endpoint: "logs-collector.observability.svc.cluster.local:4317"
       tls:
-        insecure: {{ .Values.downstream.logs.tls.insecure }}
-      {{- if eq .Values.downstream.logs.auth.type "bearer" }}
-      headers:
-        authorization: "Bearer {{ .Values.downstream.logs.auth.bearer.token }}"
-      {{- else if eq .Values.downstream.logs.auth.type "basic" }}
-      headers:
-        authorization: "Basic {{ printf "%s:%s" .Values.downstream.logs.auth.basic.username .Values.downstream.logs.auth.basic.password | b64enc }}"
-      {{- else if eq .Values.downstream.logs.auth.type "apikey" }}
-      headers:
-        {{ .Values.downstream.logs.auth.apikey.key }}: {{ .Values.downstream.logs.auth.apikey.value }}
-      {{- end }}
+        insecure: true
       sending_queue:
         enabled: true
-        num_consumers: 10  # Parallel sends for high-volume logs
+        num_consumers: 10
 
     # OTLP exporter for metrics - routes to metrics collector
     otlp/metrics:
-      endpoint: {{ .Values.downstream.metrics.endpoint }}
+      endpoint: "metrics-collector.observability.svc.cluster.local:4317"
       tls:
-        insecure: {{ .Values.downstream.metrics.tls.insecure }}
-      {{- if eq .Values.downstream.metrics.auth.type "bearer" }}
-      headers:
-        authorization: "Bearer {{ .Values.downstream.metrics.auth.bearer.token }}"
-      {{- else if eq .Values.downstream.metrics.auth.type "basic" }}
-      headers:
-        authorization: "Basic {{ printf "%s:%s" .Values.downstream.metrics.auth.basic.username .Values.downstream.metrics.auth.basic.password | b64enc }}"
-      {{- else if eq .Values.downstream.metrics.auth.type "apikey" }}
-      headers:
-        {{ .Values.downstream.metrics.auth.apikey.key }}: {{ .Values.downstream.metrics.auth.apikey.value }}
-      {{- end }}
+        insecure: true
   extensions:
     # The health_check extension is mandatory for this chart.
     # Without the health_check extension the collector will fail the readiness and liveness probes.

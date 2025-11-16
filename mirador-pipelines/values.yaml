@@ -1,0 +1,544 @@
+# Mirador Pipelines - Umbrella Chart
+# Single helm install deploys the entire connected pipeline stack
+
+# Gateway Pipeline Configuration
+gateway:
+  enabled: true
+
+  # Image configuration
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "gateway"
+  mode: "deployment"
+  replicaCount: 3
+
+  # Gateway resources
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # Gateway collector configuration
+  config:
+    exporters:
+      # Use Case 1: Service Graph - Load Balanced (DEFAULT)
+      loadbalancing/servicegraph:
+        routing_key: "traceID"
+        protocol:
+          otlp:
+            timeout: 10s
+            tls:
+              insecure: true
+        resolver:
+          dns:
+            hostname: "mirador-pipelines-servicegraph.observability.svc.cluster.local"
+            port: "4317"
+            interval: 5s
+            timeout: 1s
+
+      # Use Case 2: Span Metrics - Load Balanced (DEFAULT)
+      loadbalancing/spanmetrics:
+        routing_key: "traceID"
+        protocol:
+          otlp:
+            timeout: 10s
+            tls:
+              insecure: true
+        resolver:
+          dns:
+            hostname: "mirador-pipelines-spanmetrics.observability.svc.cluster.local"
+            port: "4317"
+            interval: 5s
+            timeout: 1s
+
+      # Fallback: Standard OTLP exporter for Service Graph (if loadbalancing disabled)
+      otlp/servicegraph:
+        endpoint: "mirador-pipelines-servicegraph.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+      # Fallback: Standard OTLP exporter for Span Metrics (if loadbalancing disabled)
+      otlp/spanmetrics:
+        endpoint: "mirador-pipelines-spanmetrics.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+      # Logs routing (standard OTLP)
+      otlp/logs:
+        endpoint: "logs-collector.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+
+      # Metrics routing (standard OTLP)
+      otlp/metrics:
+        endpoint: "metrics-collector.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      batch/traces:
+        timeout: 10s
+        send_batch_size: 1024
+
+      batch/logs:
+        timeout: 1s
+        send_batch_size: 10000
+
+      batch/metrics:
+        timeout: 60s
+        send_batch_size: 8192
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:14250
+          thrift_http:
+            endpoint: ${env:MY_POD_IP}:14268
+          thrift_compact:
+            endpoint: ${env:MY_POD_IP}:6831
+      zipkin:
+        endpoint: ${env:MY_POD_IP}:9411
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: opentelemetry-collector
+              scrape_interval: 10s
+              static_configs:
+                - targets:
+                    - ${env:MY_POD_IP}:8888
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        traces:
+          receivers: [otlp, jaeger, zipkin]
+          processors: [memory_limiter, batch/traces]
+          exporters: [loadbalancing/servicegraph, loadbalancing/spanmetrics]  # Load-balanced fan-out to both use cases
+
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch/logs]
+          exporters: [otlp/logs]
+
+        metrics:
+          receivers: [otlp, prometheus]
+          processors: [memory_limiter, batch/metrics]
+          exporters: [otlp/metrics]
+
+  # Disable all presets
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true
+
+# Service Graph Collector Configuration
+servicegraph:
+  enabled: true
+
+  # Image configuration
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "servicegraph"
+  mode: "deployment"
+  replicaCount: 1  # Must be 1 for complete service graph
+
+  # Service Graph resources
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  # Service Graph collector configuration
+  config:
+    connectors:
+      servicegraph:
+        latency_histogram_buckets: [2ms, 4ms, 6ms, 8ms, 10ms, 50ms, 100ms, 200ms, 400ms, 800ms, 1s, 1400ms, 2s, 5s, 10s, 15s]
+        dimensions:
+          - http.method
+          - http.status_code
+          - rpc.grpc.status_code
+        store:
+          ttl: 2s
+          max_items: 10000
+        cache_loop: 60m
+        store_expiration_loop: 10s
+
+    exporters:
+      otlp/traces:
+        endpoint: "tempo.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+      otlp/metrics:
+        endpoint: "prometheus.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      batch/traces:
+        timeout: 10s
+        send_batch_size: 1024
+
+      batch/metrics:
+        timeout: 30s
+        send_batch_size: 1000
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch/traces]
+          exporters: [servicegraph, otlp/traces]
+
+        metrics/servicegraph:
+          receivers: [servicegraph]
+          processors: [batch/metrics]
+          exporters: [otlp/metrics]
+
+  # Port configuration - only OTLP needed for service graph
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
+
+  # Disable all presets
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true
+
+# Span Metrics Collector Configuration (Use Case 2)
+spanmetrics:
+  enabled: true
+
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "spanmetrics"
+  mode: "deployment"
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+
+  config:
+    connectors:
+      spanmetrics:
+        histogram:
+          explicit:
+            buckets: [2ms, 4ms, 6ms, 8ms, 10ms, 50ms, 100ms, 200ms, 400ms, 800ms, 1s, 1400ms, 2s, 5s, 10s, 15s, 30s]
+        dimensions:
+          - name: http.method
+          - name: http.status_code
+        exemplars:
+          enabled: true
+        metrics_expiration: 5m
+
+    exporters:
+      otlp/isolationforest:
+        endpoint: "mirador-pipelines-isolationforest.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+      otlp/traces:
+        endpoint: "tempo.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      batch/traces:
+        timeout: 10s
+        send_batch_size: 1024
+
+      batch/metrics:
+        timeout: 30s
+        send_batch_size: 1000
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch/traces]
+          exporters: [spanmetrics, otlp/traces]
+
+        metrics/spanmetrics:
+          receivers: [spanmetrics]
+          processors: [batch/metrics]
+          exporters: [otlp/isolationforest]
+
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
+
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true
+
+# Isolation Forest Processor Configuration (Use Case 2)
+isolationforest:
+  enabled: true
+
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "isolationforest"
+  mode: "deployment"
+  replicaCount: 1
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+
+  config:
+    exporters:
+      otlp/metrics:
+        endpoint: "prometheus.observability.svc.cluster.local:4317"
+        tls:
+          insecure: true
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      # Isolation forest processor - minimal config for now
+      # Configuration will be refined based on actual processor capabilities
+      isolationforest: {}
+
+      batch/metrics:
+        timeout: 30s
+        send_batch_size: 1000
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, isolationforest, batch/metrics]
+          exporters: [otlp/metrics]
+
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
+
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true

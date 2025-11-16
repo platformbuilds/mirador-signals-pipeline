@@ -82,41 +82,15 @@ config:
   exporters:
     # OTLP exporter for traces - send to traces backend
     otlp/traces:
-      endpoint: {{ .Values.backends.traces.endpoint }}
+      endpoint: "tempo.observability.svc.cluster.local:4317"
       tls:
-        insecure: {{ .Values.backends.traces.tls.insecure }}
-        {{- if .Values.backends.traces.tls.ca_file }}
-        ca_file: {{ .Values.backends.traces.tls.ca_file }}
-        {{- end }}
-      {{- if eq .Values.backends.traces.auth.type "bearer" }}
-      headers:
-        authorization: "Bearer {{ .Values.backends.traces.auth.bearer.token }}"
-      {{- else if eq .Values.backends.traces.auth.type "basic" }}
-      headers:
-        authorization: "Basic {{ printf "%s:%s" .Values.backends.traces.auth.basic.username .Values.backends.traces.auth.basic.password | b64enc }}"
-      {{- else if eq .Values.backends.traces.auth.type "apikey" }}
-      headers:
-        {{ .Values.backends.traces.auth.apikey.key }}: {{ .Values.backends.traces.auth.apikey.value }}
-      {{- end }}
+        insecure: true
 
     # OTLP exporter for service graph metrics
     otlp/metrics:
-      endpoint: {{ .Values.backends.metrics.endpoint }}
+      endpoint: "prometheus.observability.svc.cluster.local:4317"
       tls:
-        insecure: {{ .Values.backends.metrics.tls.insecure }}
-        {{- if .Values.backends.metrics.tls.ca_file }}
-        ca_file: {{ .Values.backends.metrics.tls.ca_file }}
-        {{- end }}
-      {{- if eq .Values.backends.metrics.auth.type "bearer" }}
-      headers:
-        authorization: "Bearer {{ .Values.backends.metrics.auth.bearer.token }}"
-      {{- else if eq .Values.backends.metrics.auth.type "basic" }}
-      headers:
-        authorization: "Basic {{ printf "%s:%s" .Values.backends.metrics.auth.basic.username .Values.backends.metrics.auth.basic.password | b64enc }}"
-      {{- else if eq .Values.backends.metrics.auth.type "apikey" }}
-      headers:
-        {{ .Values.backends.metrics.auth.apikey.key }}: {{ .Values.backends.metrics.auth.apikey.value }}
-      {{- end }}
+        insecure: true
 
   extensions:
     # The health_check extension is mandatory for this chart

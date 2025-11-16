@@ -1,0 +1,30 @@
+# Claude Code directory
+.claude/
+
+# Helm
+charts/
+*.tgz
+Chart.lock
+
+# Kubernetes
+*.kubeconfig
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+*.tmp
+*.temp
