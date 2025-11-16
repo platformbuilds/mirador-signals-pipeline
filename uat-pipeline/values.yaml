@@ -1,15 +1,57 @@
-# Default values for opentelemetry-collector.
+# Default values for Mirador Gateway Pipeline (UAT Environment)
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-nameOverride: ""
+nameOverride: "gateway"
 fullnameOverride: ""
 
 # Valid values are "daemonset", "deployment", and "statefulset".
-mode: ""
+# Gateway pipeline uses deployment mode for centralized collection
+mode: "deployment"
 
 # Specify which namespace should be used to deploy the resources into
 namespaceOverride: ""
+
+# Downstream collector endpoints configuration
+# Configure where the gateway should route telemetry signals
+downstream:
+  # Service Graph collector endpoint (receives all traces)
+  servicegraph:
+    endpoint: "servicegraph-collector.observability.svc.cluster.local:4317"
+    tls:
+      enabled: false
+      insecure: true
+      # ca_file: ""
+      # cert_file: ""
+      # key_file: ""
+    auth:
+      type: "none"  # Options: none, bearer, basic, apikey
+      # bearer:
+      #   token: ""
+      # basic:
+      #   username: ""
+      #   password: ""
+      # apikey:
+      #   key: ""
+      #   value: ""
+
+  # Logs collector endpoint
+  logs:
+    endpoint: "logs-collector.observability.svc.cluster.local:4317"
+    tls:
+      enabled: false
+      insecure: true
+    auth:
+      type: "none"
+
+  # Metrics collector endpoint
+  metrics:
+    endpoint: "metrics-collector.observability.svc.cluster.local:4317"
+    tls:
+      enabled: false
+      insecure: true
+    auth:
+      type: "none"
 
 # Handles basic configuration of components that
 # also require k8s modifications to work correctly.
@@ -137,7 +179,59 @@ internalTelemetryViaOTLP:
 # For example, {{ REDACTED_EMAIL }} becomes {{` {{ REDACTED_EMAIL }} `}}.
 config:
   exporters:
-    debug: {}
+    # OTLP exporter for traces - routes to Service Graph collector
+    otlp/servicegraph:
+      endpoint: {{ .Values.downstream.servicegraph.endpoint }}
+      tls:
+        insecure: {{ .Values.downstream.servicegraph.tls.insecure }}
+        {{- if .Values.downstream.servicegraph.tls.ca_file }}
+        ca_file: {{ .Values.downstream.servicegraph.tls.ca_file }}
+        {{- end }}
+      {{- if eq .Values.downstream.servicegraph.auth.type "bearer" }}
+      headers:
+        authorization: "Bearer {{ .Values.downstream.servicegraph.auth.bearer.token }}"
+      {{- else if eq .Values.downstream.servicegraph.auth.type "basic" }}
+      headers:
+        authorization: "Basic {{ printf "%s:%s" .Values.downstream.servicegraph.auth.basic.username .Values.downstream.servicegraph.auth.basic.password | b64enc }}"
+      {{- else if eq .Values.downstream.servicegraph.auth.type "apikey" }}
+      headers:
+        {{ .Values.downstream.servicegraph.auth.apikey.key }}: {{ .Values.downstream.servicegraph.auth.apikey.value }}
+      {{- end }}
+
+    # OTLP exporter for logs - routes to logs collector
+    otlp/logs:
+      endpoint: {{ .Values.downstream.logs.endpoint }}
+      tls:
+        insecure: {{ .Values.downstream.logs.tls.insecure }}
+      {{- if eq .Values.downstream.logs.auth.type "bearer" }}
+      headers:
+        authorization: "Bearer {{ .Values.downstream.logs.auth.bearer.token }}"
+      {{- else if eq .Values.downstream.logs.auth.type "basic" }}
+      headers:
+        authorization: "Basic {{ printf "%s:%s" .Values.downstream.logs.auth.basic.username .Values.downstream.logs.auth.basic.password | b64enc }}"
+      {{- else if eq .Values.downstream.logs.auth.type "apikey" }}
+      headers:
+        {{ .Values.downstream.logs.auth.apikey.key }}: {{ .Values.downstream.logs.auth.apikey.value }}
+      {{- end }}
+      sending_queue:
+        enabled: true
+        num_consumers: 10  # Parallel sends for high-volume logs
+
+    # OTLP exporter for metrics - routes to metrics collector
+    otlp/metrics:
+      endpoint: {{ .Values.downstream.metrics.endpoint }}
+      tls:
+        insecure: {{ .Values.downstream.metrics.tls.insecure }}
+      {{- if eq .Values.downstream.metrics.auth.type "bearer" }}
+      headers:
+        authorization: "Bearer {{ .Values.downstream.metrics.auth.bearer.token }}"
+      {{- else if eq .Values.downstream.metrics.auth.type "basic" }}
+      headers:
+        authorization: "Basic {{ printf "%s:%s" .Values.downstream.metrics.auth.basic.username .Values.downstream.metrics.auth.basic.password | b64enc }}"
+      {{- else if eq .Values.downstream.metrics.auth.type "apikey" }}
+      headers:
+        {{ .Values.downstream.metrics.auth.apikey.key }}: {{ .Values.downstream.metrics.auth.apikey.value }}
+      {{- end }}
   extensions:
     # The health_check extension is mandatory for this chart.
     # Without the health_check extension the collector will fail the readiness and liveness probes.
@@ -145,7 +239,6 @@ config:
     health_check:
       endpoint: ${env:MY_POD_IP}:13133
   processors:
-    batch: {}
     # Default memory limiter configuration for the collector based on k8s resource limits.
     memory_limiter:
       # check_interval is the time between measurements of memory usage.
@@ -154,6 +247,21 @@ config:
       limit_percentage: 80
       # By default spike_limit_mib is set to 25% of ".Values.resources.limits.memory"
       spike_limit_percentage: 25
+
+    # Optimized batch processor for traces
+    batch/traces:
+      timeout: 10s
+      send_batch_size: 1024
+
+    # Optimized batch processor for logs (high-volume)
+    batch/logs:
+      timeout: 1s           # Short timeout for high-volume logs
+      send_batch_size: 10000  # Large batch size fills quickly at high volume
+
+    # Optimized batch processor for metrics
+    batch/metrics:
+      timeout: 60s
+      send_batch_size: 8192
   receivers:
     jaeger:
       protocols:
@@ -192,34 +300,39 @@ config:
     extensions:
       - health_check
     pipelines:
-      logs:
-        exporters:
-          - debug
-        processors:
-          - memory_limiter
-          - batch
-        receivers:
-          - otlp
-      metrics:
-        exporters:
-          - debug
-        processors:
-          - memory_limiter
-          - batch
-        receivers:
-          - otlp
-          # if internalTelemetryViaOTLP.metrics.enabled = true, prometheus receiver will be removed
-          - prometheus
+      # Traces pipeline - routes to Service Graph collector
       traces:
-        exporters:
-          - debug
-        processors:
-          - memory_limiter
-          - batch
         receivers:
           - otlp
           - jaeger
           - zipkin
+        processors:
+          - memory_limiter
+          - batch/traces
+        exporters:
+          - otlp/servicegraph
+
+      # Logs pipeline - routes to logs collector
+      logs:
+        receivers:
+          - otlp
+        processors:
+          - memory_limiter
+          - batch/logs
+        exporters:
+          - otlp/logs
+
+      # Metrics pipeline - routes to metrics collector
+      metrics:
+        receivers:
+          - otlp
+          # if internalTelemetryViaOTLP.metrics.enabled = true, prometheus receiver will be removed
+          - prometheus
+        processors:
+          - memory_limiter
+          - batch/metrics
+        exporters:
+          - otlp/metrics
 
 # Helm currently has an issue (https://github.com/helm/helm/pull/12879) when using null to remove
 # default configuration from a subchart. The result is that you cannot remove default configuration
@@ -380,11 +493,14 @@ useGOMEMLIMIT: true
 
 # Resource limits & requests.
 # It is HIGHLY recommended to set resource limits.
-resources: {}
-# resources:
-#   limits:
-#     cpu: 250m
-#     memory: 512Mi
+# Gateway pipeline recommended resources for high-volume traffic
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
 
 enableConfigChecksumAnnotation: true
 podAnnotations: {}
@@ -415,7 +531,8 @@ dnsConfig: {}
 schedulerName: ""
 
 # only used with deployment mode
-replicaCount: 1
+# Gateway pipeline recommended: 3 replicas for HA
+replicaCount: 3
 
 revisionHistoryLimit: 10
 
