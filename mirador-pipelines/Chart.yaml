@@ -1,0 +1,30 @@
+apiVersion: v2
+name: mirador-pipelines
+version: 0.1.0
+description: Mirador Signals Pipeline Stack - Complete observability pipeline with Gateway, Service Graph, Span Metrics, and Isolation Forest
+type: application
+dependencies:
+  # Gateway collector - receives telemetry from applications
+  - name: mirador-otel-gateway
+    version: "0.1.0"
+    repository: "file://../uat-pipeline"
+    alias: gateway
+    condition: gateway.enabled
+  # Service Graph collector - generates service topology metrics (Use Case 1)
+  - name: mirador-otel-gateway
+    version: "0.1.0"
+    repository: "file://../uat-pipeline"
+    alias: servicegraph
+    condition: servicegraph.enabled
+  # Span Metrics collector - generates RED metrics from traces (Use Case 2)
+  - name: mirador-otel-gateway
+    version: "0.1.0"
+    repository: "file://../uat-pipeline"
+    alias: spanmetrics
+    condition: spanmetrics.enabled
+  # Isolation Forest - anomaly detection on span metrics (Use Case 2)
+  - name: mirador-otel-gateway
+    version: "0.1.0"
+    repository: "file://../uat-pipeline"
+    alias: isolationforest
+    condition: isolationforest.enabled

@@ -1,7 +1,7 @@
 apiVersion: v2
-name: opentelemetry-collector
-version: 0.138.1
-description: OpenTelemetry Collector Helm chart for Kubernetes
+name: mirador-otel-gateway
+version: 0.1.0
+description: Mirador Signals Gateway - OpenTelemetry Collector for UAT Environment
 type: application
 home: https://opentelemetry.io/
 sources:
