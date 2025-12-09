@@ -1,10 +1,8 @@
-# Claude Code directory
-.claude/
-
-# Helm
-charts/
+# Helm - ignore packaged charts and lock file, but keep source charts
 *.tgz
 Chart.lock
+# Ignore dependencies downloaded into charts/ but NOT our custom charts/otel-collector/
+# (Git will ignore *.tgz files at any level)
 
 # Kubernetes
 *.kubeconfig

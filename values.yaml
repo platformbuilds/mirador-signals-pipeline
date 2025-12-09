@@ -1,6 +1,12 @@
 # Mirador Pipelines - Umbrella Chart
 # Single helm install deploys the entire connected pipeline stack
 
+# Global settings
+global:
+  # Default namespace for the stack (used in DNS hostnames)
+  # To create namespace automatically, use: --create-namespace flag with helm install
+  namespace: miradorstack
+
 # Gateway Pipeline Configuration
 gateway:
   enabled: true
@@ -16,6 +22,14 @@ gateway:
   nameOverride: "gateway"
   mode: "deployment"
   replicaCount: 3
+
+  # Enable RBAC for K8s service discovery in loadbalancing exporter
+  clusterRole:
+    create: true
+    rules:
+      - apiGroups: [""]
+        resources: ["services", "endpoints"]
+        verbs: ["get", "list", "watch"]
 
   # Gateway resources
   resources:
@@ -38,11 +52,10 @@ gateway:
             tls:
               insecure: true
         resolver:
-          dns:
-            hostname: "mirador-pipelines-servicegraph.observability.svc.cluster.local"
-            port: "4317"
-            interval: 5s
-            timeout: 1s
+          k8s:
+            service: "mirador-pipelines-servicegraph"
+            ports:
+              - 4317
 
       # Use Case 2: Span Metrics - Load Balanced (DEFAULT)
       loadbalancing/spanmetrics:
@@ -53,36 +66,49 @@ gateway:
             tls:
               insecure: true
         resolver:
-          dns:
-            hostname: "mirador-pipelines-spanmetrics.observability.svc.cluster.local"
-            port: "4317"
-            interval: 5s
-            timeout: 1s
+          k8s:
+            service: "mirador-pipelines-spanmetrics"
+            ports:
+              - 4317
+
+      # Use Case 3: Application Metrics Anomaly Detection - Load Balanced (NEW)
+      loadbalancing/isolationforest-metrics:
+        routing_key: "resource"  # Route by resource attributes for consistent anomaly baselines
+        protocol:
+          otlp:
+            timeout: 10s
+            tls:
+              insecure: true
+        resolver:
+          k8s:
+            service: "mirador-pipelines-isolationforest"
+            ports:
+              - 4317
 
       # Fallback: Standard OTLP exporter for Service Graph (if loadbalancing disabled)
       otlp/servicegraph:
-        endpoint: "mirador-pipelines-servicegraph.observability.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-servicegraph.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
       # Fallback: Standard OTLP exporter for Span Metrics (if loadbalancing disabled)
       otlp/spanmetrics:
-        endpoint: "mirador-pipelines-spanmetrics.observability.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-spanmetrics.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
-      # Logs routing (standard OTLP)
+      # Logs routing to Cassandra
       otlp/logs:
-        endpoint: "logs-collector.observability.svc.cluster.local:4317"
+        endpoint: "cassandra-logs.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
         sending_queue:
           enabled: true
           num_consumers: 10
 
-      # Metrics routing (standard OTLP)
+      # Metrics routing to VictoriaMetrics
       otlp/metrics:
-        endpoint: "metrics-collector.observability.svc.cluster.local:4317"
+        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -115,16 +141,6 @@ gateway:
             endpoint: ${env:MY_POD_IP}:4317
           http:
             endpoint: ${env:MY_POD_IP}:4318
-      jaeger:
-        protocols:
-          grpc:
-            endpoint: ${env:MY_POD_IP}:14250
-          thrift_http:
-            endpoint: ${env:MY_POD_IP}:14268
-          thrift_compact:
-            endpoint: ${env:MY_POD_IP}:6831
-      zipkin:
-        endpoint: ${env:MY_POD_IP}:9411
       prometheus:
         config:
           scrape_configs:
@@ -147,7 +163,7 @@ gateway:
         - health_check
       pipelines:
         traces:
-          receivers: [otlp, jaeger, zipkin]
+          receivers: [otlp]
           processors: [memory_limiter, batch/traces]
           exporters: [loadbalancing/servicegraph, loadbalancing/spanmetrics]  # Load-balanced fan-out to both use cases
 
@@ -159,7 +175,24 @@ gateway:
         metrics:
           receivers: [otlp, prometheus]
           processors: [memory_limiter, batch/metrics]
-          exporters: [otlp/metrics]
+          exporters: [loadbalancing/isolationforest-metrics]  # Single-export: All metrics through IsolationForest for anomaly detection
+
+  # Port configuration - only OTLP needed for gateway
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
 
   # Disable all presets
   presets:
@@ -220,12 +253,12 @@ servicegraph:
 
     exporters:
       otlp/traces:
-        endpoint: "tempo.observability.svc.cluster.local:4317"
+        endpoint: "victoriatraces.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
       otlp/metrics:
-        endpoint: "prometheus.observability.svc.cluster.local:4317"
+        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -349,12 +382,12 @@ spanmetrics:
 
     exporters:
       otlp/isolationforest:
-        endpoint: "mirador-pipelines-isolationforest.observability.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-isolationforest.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
       otlp/traces:
-        endpoint: "tempo.observability.svc.cluster.local:4317"
+        endpoint: "victoriatraces.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -451,7 +484,7 @@ isolationforest:
 
   nameOverride: "isolationforest"
   mode: "deployment"
-  replicaCount: 1
+  replicaCount: 3  # Scaled for HA and loadbalancing from gateway
 
   resources:
     limits:
@@ -464,7 +497,7 @@ isolationforest:
   config:
     exporters:
       otlp/metrics:
-        endpoint: "prometheus.observability.svc.cluster.local:4317"
+        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 

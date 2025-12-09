@@ -1,7 +1,7 @@
 apiVersion: v2
-name: mirador-otel-gateway
+name: otel-collector
 version: 0.1.0
-description: Mirador Signals Gateway - OpenTelemetry Collector for UAT Environment
+description: OpenTelemetry Collector - Reusable base chart for Mirador Signals Pipeline
 type: application
 home: https://opentelemetry.io/
 sources:

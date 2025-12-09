@@ -17,7 +17,7 @@ namespaceOverride: ""
 downstream:
   # Service Graph collector endpoint (receives all traces)
   servicegraph:
-    endpoint: "servicegraph-collector.observability.svc.cluster.local:4317"
+    endpoint: "servicegraph-collector.miradorstack.svc.cluster.local:4317"
     tls:
       enabled: false
       insecure: true
@@ -37,7 +37,7 @@ downstream:
 
   # Logs collector endpoint
   logs:
-    endpoint: "logs-collector.observability.svc.cluster.local:4317"
+    endpoint: "logs-collector.miradorstack.svc.cluster.local:4317"
     tls:
       enabled: false
       insecure: true
@@ -46,7 +46,7 @@ downstream:
 
   # Metrics collector endpoint
   metrics:
-    endpoint: "metrics-collector.observability.svc.cluster.local:4317"
+    endpoint: "metrics-collector.miradorstack.svc.cluster.local:4317"
     tls:
       enabled: false
       insecure: true
@@ -182,13 +182,13 @@ config:
     # OTLP exporter for traces - routes to Service Graph collector
     # Note: Actual endpoint/auth configuration is injected via templates/_config.tpl
     otlp/servicegraph:
-      endpoint: "servicegraph-collector.observability.svc.cluster.local:4317"
+      endpoint: "servicegraph-collector.miradorstack.svc.cluster.local:4317"
       tls:
         insecure: true
 
     # OTLP exporter for logs - routes to logs collector
     otlp/logs:
-      endpoint: "logs-collector.observability.svc.cluster.local:4317"
+      endpoint: "logs-collector.miradorstack.svc.cluster.local:4317"
       tls:
         insecure: true
       sending_queue:
@@ -197,7 +197,7 @@ config:
 
     # OTLP exporter for metrics - routes to metrics collector
     otlp/metrics:
-      endpoint: "metrics-collector.observability.svc.cluster.local:4317"
+      endpoint: "metrics-collector.miradorstack.svc.cluster.local:4317"
       tls:
         insecure: true
   extensions:
@@ -231,14 +231,6 @@ config:
       timeout: 60s
       send_batch_size: 8192
   receivers:
-    jaeger:
-      protocols:
-        grpc:
-          endpoint: ${env:MY_POD_IP}:14250
-        thrift_http:
-          endpoint: ${env:MY_POD_IP}:14268
-        thrift_compact:
-          endpoint: ${env:MY_POD_IP}:6831
     otlp:
       protocols:
         grpc:
@@ -254,8 +246,6 @@ config:
             static_configs:
               - targets:
                   - ${env:MY_POD_IP}:8888
-    zipkin:
-      endpoint: ${env:MY_POD_IP}:9411
   service:
     telemetry:
       metrics:
@@ -272,8 +262,6 @@ config:
       traces:
         receivers:
           - otlp
-          - jaeger
-          - zipkin
         processors:
           - memory_limiter
           - batch/traces
@@ -423,25 +411,25 @@ ports:
     hostPort: 4318
     protocol: TCP
   jaeger-compact:
-    enabled: true
+    enabled: false
     containerPort: 6831
     servicePort: 6831
     hostPort: 6831
     protocol: UDP
   jaeger-thrift:
-    enabled: true
+    enabled: false
     containerPort: 14268
     servicePort: 14268
     hostPort: 14268
     protocol: TCP
   jaeger-grpc:
-    enabled: true
+    enabled: false
     containerPort: 14250
     servicePort: 14250
     hostPort: 14250
     protocol: TCP
   zipkin:
-    enabled: true
+    enabled: false
     containerPort: 9411
     servicePort: 9411
     hostPort: 9411
