@@ -1,7 +1,7 @@
 apiVersion: v2
-name: opentelemetry-collector
-version: 0.138.1
-description: OpenTelemetry Collector Helm chart for Kubernetes
+name: otel-collector
+version: 0.1.0
+description: OpenTelemetry Collector - Reusable base chart for Mirador Signals Pipeline
 type: application
 home: https://opentelemetry.io/
 sources:

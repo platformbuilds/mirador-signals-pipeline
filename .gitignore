@@ -1,0 +1,28 @@
+# Helm - ignore packaged charts and lock file, but keep source charts
+*.tgz
+Chart.lock
+# Ignore dependencies downloaded into charts/ but NOT our custom charts/otel-collector/
+# (Git will ignore *.tgz files at any level)
+
+# Kubernetes
+*.kubeconfig
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+*.tmp
+*.temp

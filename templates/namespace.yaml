@@ -1,0 +1,6 @@
+{{/*
+Namespace is created using helm's --create-namespace flag.
+This template is kept for documentation purposes only.
+To create the namespace automatically, use:
+  helm install mirador-pipelines ./mirador-pipelines --namespace miradorstack --create-namespace
+*/}}
