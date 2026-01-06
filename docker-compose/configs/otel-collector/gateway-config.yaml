@@ -1,0 +1,76 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  batch/traces:
+    timeout: 10s
+    send_batch_size: 1024
+
+  batch/logs:
+    timeout: 1s
+    send_batch_size: 10000
+
+  batch/metrics:
+    timeout: 60s
+    send_batch_size: 8192
+
+exporters:
+  # Service Graph Pipeline
+  otlp/servicegraph:
+    endpoint: servicegraph:4317
+    tls:
+      insecure: true
+
+  # Span Metrics Pipeline
+  otlp/spanmetrics:
+    endpoint: spanmetrics:4317
+    tls:
+      insecure: true
+
+  # Application Metrics to Isolation Forest
+  otlp/isolationforest:
+    endpoint: isolationforest:4317
+    tls:
+      insecure: true
+
+  # Logs to VictoriaLogs
+  otlp/logs:
+    endpoint: vlogadapter:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/traces]
+      exporters: [otlp/servicegraph, otlp/spanmetrics]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/logs]
+      exporters: [otlp/logs]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/metrics]
+      exporters: [otlp/isolationforest]
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888

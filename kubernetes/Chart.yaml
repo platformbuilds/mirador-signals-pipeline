@@ -28,3 +28,33 @@ dependencies:
     repository: "file://./charts/otel-collector"
     alias: isolationforest
     condition: isolationforest.enabled
+  # VictoriaMetrics Cluster - metrics storage
+  - name: victoria-metrics-cluster
+    version: "0.31.0"
+    repository: "https://victoriametrics.github.io/helm-charts/"
+    alias: victoriametrics
+    condition: victoriametrics.enabled
+  # VictoriaTraces Cluster - traces storage
+  - name: victoria-traces-cluster
+    version: "0.0.4"
+    repository: "https://victoriametrics.github.io/helm-charts/"
+    alias: victoriatraces
+    condition: victoriatraces.enabled
+  # VictoriaLogs Cluster - logs storage
+  - name: victoria-logs-cluster
+    version: "0.0.24"
+    repository: "https://victoriametrics.github.io/helm-charts/"
+    alias: victorialogs
+    condition: victorialogs.enabled
+  # OTEL Collector for VictoriaMetrics (OTLP adapter)
+  - name: otel-collector
+    version: "0.1.0"
+    repository: "file://./charts/otel-collector"
+    alias: vmadapter
+    condition: vmadapter.enabled
+  # OTEL Collector for VictoriaLogs (OTLP adapter)
+  - name: otel-collector
+    version: "0.1.0"
+    repository: "file://./charts/otel-collector"
+    alias: vlogadapter
+    condition: vlogadapter.enabled

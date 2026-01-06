@@ -1,0 +1,40 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Placeholder for future anomaly detection processor
+  batch/metrics:
+    timeout: 30s
+    send_batch_size: 1000
+
+exporters:
+  otlp/metrics:
+    endpoint: vmadapter:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/metrics]
+      exporters: [otlp/metrics]
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888

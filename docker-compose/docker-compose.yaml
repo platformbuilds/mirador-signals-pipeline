@@ -1,0 +1,302 @@
+networks:
+  mirador:
+    driver: bridge
+
+volumes:
+  vmstorage-data:
+  vtstorage-data:
+  vlstorage-data:
+
+services:
+  # ========================
+  # HAProxy Load Balancer
+  # ========================
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: mirador-haproxy
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8404:8404"   # HAProxy Stats
+      - "8480:8480"   # VictoriaMetrics Insert
+      - "8481:8481"   # VictoriaMetrics Query
+      - "4327:4327"   # VictoriaTraces Insert
+      - "8483:8483"   # VictoriaTraces Query
+      - "8429:8429"   # VictoriaLogs Insert
+      - "9471:9471"   # VictoriaLogs Query
+      - "8888:8888"   # Gateway Metrics
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - mirador
+    depends_on:
+      - gateway
+      - vminsert
+      - vmselect
+      - vtinsert
+      - vtselect
+      - vlinsert
+      - vlselect
+    restart: unless-stopped
+
+  # ========================
+  # OTEL Gateway Collector
+  # ========================
+  gateway:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-gateway
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/gateway-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - servicegraph
+      - spanmetrics
+      - isolationforest
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=1GiB
+
+  # ========================
+  # Service Graph Collector
+  # ========================
+  servicegraph:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-servicegraph
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/servicegraph-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - vtinsert
+      - vmadapter
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=1GiB
+
+  # ========================
+  # Span Metrics Collector
+  # ========================
+  spanmetrics:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-spanmetrics
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/spanmetrics-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - isolationforest
+      - vtinsert
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=1GiB
+
+  # ========================
+  # Isolation Forest Collector
+  # ========================
+  isolationforest:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-isolationforest
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/isolationforest-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - vmadapter
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=2GiB
+
+  # ========================
+  # VictoriaMetrics Adapter
+  # ========================
+  vmadapter:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-vmadapter
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/vmadapter-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - vminsert
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=512MiB
+
+  # ========================
+  # VictoriaLogs Adapter
+  # ========================
+  vlogadapter:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    container_name: mirador-vlogadapter
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./configs/otel-collector/vlogadapter-config.yaml:/etc/otelcol/config.yaml:ro
+    networks:
+      - mirador
+    depends_on:
+      - vlinsert
+    restart: unless-stopped
+    environment:
+      - GOMEMLIMIT=512MiB
+
+  # ========================
+  # VictoriaMetrics Cluster
+  # ========================
+  vminsert:
+    image: victoriametrics/vminsert:v1.108.1-cluster
+    container_name: mirador-vminsert
+    command:
+      - "-storageNode=vmstorage:8400"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VM_"
+      - "-loggerFormat=json"
+    networks:
+      - mirador
+    depends_on:
+      - vmstorage
+    restart: unless-stopped
+    environment:
+      - VM_httpListenAddr=:8480
+
+  vmselect:
+    image: victoriametrics/vmselect:v1.108.1-cluster
+    container_name: mirador-vmselect
+    command:
+      - "-storageNode=vmstorage:8401"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VM_"
+      - "-loggerFormat=json"
+    networks:
+      - mirador
+    depends_on:
+      - vmstorage
+    restart: unless-stopped
+    environment:
+      - VM_httpListenAddr=:8481
+
+  vmstorage:
+    image: victoriametrics/vmstorage:v1.108.1-cluster
+    container_name: mirador-vmstorage
+    command:
+      - "-retentionPeriod=${VM_RETENTION:-30d}"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VM_"
+      - "-loggerFormat=json"
+      - "-storageDataPath=/storage"
+    volumes:
+      - vmstorage-data:/storage
+    networks:
+      - mirador
+    restart: unless-stopped
+
+  # ========================
+  # VictoriaTraces Cluster
+  # ========================
+  vtinsert:
+    image: victoriametrics/victoria-traces:v0.5.1
+    container_name: mirador-vtinsert
+    command:
+      - "-storageNode=vtstorage:8401"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VT_"
+      - "-loggerFormat=json"
+      - "-otlpGRPCListenAddr=:4317"
+      - "-otlpGRPC.tls=false"
+    networks:
+      - mirador
+    depends_on:
+      - vtstorage
+    restart: unless-stopped
+    environment:
+      - VT_httpListenAddr=:8480
+
+  vtselect:
+    image: victoriametrics/victoria-traces:v0.5.1
+    container_name: mirador-vtselect
+    command:
+      - "-storageNode=vtstorage:8401"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VT_"
+      - "-loggerFormat=json"
+    networks:
+      - mirador
+    depends_on:
+      - vtstorage
+    restart: unless-stopped
+    environment:
+      - VT_httpListenAddr=:8481
+
+  vtstorage:
+    image: victoriametrics/victoria-traces:v0.5.1
+    container_name: mirador-vtstorage
+    command:
+      - "-retentionPeriod=${VT_RETENTION:-30d}"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VT_"
+      - "-loggerFormat=json"
+      - "-storageDataPath=/storage"
+    volumes:
+      - vtstorage-data:/storage
+    networks:
+      - mirador
+    restart: unless-stopped
+    environment:
+      - VT_httpListenAddr=:8401
+
+  # ========================
+  # VictoriaLogs Cluster
+  # ========================
+  vlinsert:
+    image: victoriametrics/victoria-logs:v1.43.1
+    container_name: mirador-vlinsert
+    command:
+      - "-storageNode=vlstorage:9401"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VL_"
+      - "-loggerFormat=json"
+    networks:
+      - mirador
+    depends_on:
+      - vlstorage
+    restart: unless-stopped
+    environment:
+      - VL_httpListenAddr=:8429
+
+  vlselect:
+    image: victoriametrics/victoria-logs:v1.43.1
+    container_name: mirador-vlselect
+    command:
+      - "-storageNode=vlstorage:9401"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VL_"
+      - "-loggerFormat=json"
+    networks:
+      - mirador
+    depends_on:
+      - vlstorage
+    restart: unless-stopped
+    environment:
+      - VL_httpListenAddr=:9471
+
+  vlstorage:
+    image: victoriametrics/victoria-logs:v1.43.1
+    container_name: mirador-vlstorage
+    command:
+      - "-retentionPeriod=${VL_RETENTION:-30d}"
+      - "-envflag.enable=true"
+      - "-envflag.prefix=VL_"
+      - "-loggerFormat=json"
+      - "-storageDataPath=/storage"
+    volumes:
+      - vlstorage-data:/storage
+    networks:
+      - mirador
+    restart: unless-stopped
+    environment:
+      - VL_httpListenAddr=:9401

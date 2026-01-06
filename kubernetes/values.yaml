@@ -32,13 +32,7 @@ gateway:
         verbs: ["get", "list", "watch"]
 
   # Gateway resources
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 2Gi
-    requests:
-      cpu: 500m
-      memory: 1Gi
+  resources: {}
 
   # Gateway collector configuration
   config:
@@ -97,18 +91,18 @@ gateway:
         tls:
           insecure: true
 
-      # Logs routing to Cassandra
+      # Logs routing to VictoriaLogs (via adapter)
       otlp/logs:
-        endpoint: "cassandra-logs.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-vlogadapter.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
         sending_queue:
           enabled: true
           num_consumers: 10
 
-      # Metrics routing to VictoriaMetrics
+      # Metrics routing to VictoriaMetrics (via adapter)
       otlp/metrics:
-        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-vmadapter.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -228,13 +222,7 @@ servicegraph:
   replicaCount: 1  # Must be 1 for complete service graph
 
   # Service Graph resources
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 2Gi
-    requests:
-      cpu: 500m
-      memory: 1Gi
+  resources: {}
 
   # Service Graph collector configuration
   config:
@@ -253,12 +241,12 @@ servicegraph:
 
     exporters:
       otlp/traces:
-        endpoint: "victoriatraces.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-victoriatraces-victoria-traces-cluster-vtinsert.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
       otlp/metrics:
-        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-vmadapter.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -359,13 +347,7 @@ spanmetrics:
   mode: "deployment"
   replicaCount: 1
 
-  resources:
-    limits:
-      cpu: 1000m
-      memory: 2Gi
-    requests:
-      cpu: 500m
-      memory: 1Gi
+  resources: {}
 
   config:
     connectors:
@@ -387,7 +369,7 @@ spanmetrics:
           insecure: true
 
       otlp/traces:
-        endpoint: "victoriatraces.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-victoriatraces-victoria-traces-cluster-vtinsert.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -486,18 +468,12 @@ isolationforest:
   mode: "deployment"
   replicaCount: 3  # Scaled for HA and loadbalancing from gateway
 
-  resources:
-    limits:
-      cpu: 2000m
-      memory: 4Gi
-    requests:
-      cpu: 1000m
-      memory: 2Gi
+  resources: {}
 
   config:
     exporters:
       otlp/metrics:
-        endpoint: "victoriametrics.miradorstack.svc.cluster.local:4317"
+        endpoint: "mirador-pipelines-vmadapter.miradorstack.svc.cluster.local:4317"
         tls:
           insecure: true
 
@@ -543,6 +519,442 @@ isolationforest:
           receivers: [otlp]
           processors: [memory_limiter, isolationforest, batch/metrics]
           exporters: [otlp/metrics]
+
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
+
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true
+
+# VictoriaMetrics Cluster Configuration
+victoriametrics:
+  enabled: true
+
+  vminsert:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8480
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VM_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vminsert
+              topologyKey: kubernetes.io/hostname
+
+  vmselect:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8481
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VM_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vmselect
+              topologyKey: kubernetes.io/hostname
+
+  vmstorage:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8482
+      type: ClusterIP
+    resources: {}
+    persistentVolume:
+      enabled: true
+      size: 50Gi
+      storageClass: "manual"
+    retentionPeriod: "30d"
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VM_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vmstorage
+              topologyKey: kubernetes.io/hostname
+
+# VictoriaMetrics OTLP Adapter Configuration
+vmadapter:
+  enabled: true
+
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "vmadapter"
+  mode: "deployment"
+  replicaCount: 2
+
+  resources: {}
+
+  config:
+    exporters:
+      otlphttp/victoriametrics:
+        endpoint: "http://mirador-pipelines-victoriametrics-victoria-metrics-cluster-vminsert.miradorstack.svc.cluster.local:8480/insert/0/opentelemetry"
+        tls:
+          insecure: true
+        compression: gzip
+        encoding: proto
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      batch:
+        timeout: 60s
+        send_batch_size: 8192
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/victoriametrics]
+
+  ports:
+    otlp:
+      enabled: true
+    otlp-http:
+      enabled: true
+    jaeger-compact:
+      enabled: false
+    jaeger-thrift:
+      enabled: false
+    jaeger-grpc:
+      enabled: false
+    zipkin:
+      enabled: false
+    metrics:
+      enabled: true
+
+  presets:
+    logsCollection:
+      enabled: false
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: false
+    kubeletMetrics:
+      enabled: false
+    kubernetesEvents:
+      enabled: false
+    clusterMetrics:
+      enabled: false
+
+  useGOMEMLIMIT: true
+
+# VictoriaTraces Cluster Configuration
+victoriatraces:
+  enabled: true
+
+  vtinsert:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8480
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VT_"
+      loggerFormat: "json"
+      otlpGRPCListenAddr: ":4317"
+      otlpGRPC.tls: "false"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vtinsert
+              topologyKey: kubernetes.io/hostname
+
+  vtselect:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8481
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VT_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vtselect
+              topologyKey: kubernetes.io/hostname
+
+  vtstorage:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8482
+      type: ClusterIP
+    resources: {}
+    persistentVolume:
+      enabled: true
+      size: 50Gi
+      storageClass: "manual"
+    retentionPeriod: "30d"
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VT_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vtstorage
+              topologyKey: kubernetes.io/hostname
+
+# VictoriaLogs Cluster Configuration
+victorialogs:
+  enabled: true
+
+  vlinsert:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 8429
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VL_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vlinsert
+              topologyKey: kubernetes.io/hostname
+
+  vlselect:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 9471
+      type: ClusterIP
+    resources: {}
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VL_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vlselect
+              topologyKey: kubernetes.io/hostname
+
+  vlstorage:
+    enabled: true
+    replicaCount: 3
+    service:
+      servicePort: 9472
+      type: ClusterIP
+    resources: {}
+    persistentVolume:
+      enabled: true
+      size: 100Gi
+      storageClass: "manual"
+    retentionPeriod: "30d"
+    extraArgs:
+      envflag.enable: "true"
+      envflag.prefix: "VL_"
+      loggerFormat: "json"
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/name
+                    operator: In
+                    values:
+                      - vlstorage
+              topologyKey: kubernetes.io/hostname
+
+# VictoriaLogs OTLP Adapter Configuration
+vlogadapter:
+  enabled: true
+
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    pullPolicy: IfNotPresent
+
+  command:
+    name: otelcol-contrib
+
+  nameOverride: "vlogadapter"
+  mode: "deployment"
+  replicaCount: 2
+
+  resources: {}
+
+  config:
+    exporters:
+      otlphttp/victorialogs:
+        endpoint: "http://mirador-pipelines-victorialogs-victoria-logs-cluster-vlinsert.miradorstack.svc.cluster.local:8429/insert/opentelemetry/v1/logs"
+        tls:
+          insecure: true
+        compression: gzip
+
+    extensions:
+      health_check:
+        endpoint: ${env:MY_POD_IP}:13133
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      batch:
+        timeout: 1s
+        send_batch_size: 10000
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: ${env:MY_POD_IP}:4317
+          http:
+            endpoint: ${env:MY_POD_IP}:4318
+
+    service:
+      telemetry:
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: ${env:MY_POD_IP}
+                    port: 8888
+      extensions:
+        - health_check
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [otlphttp/victorialogs]
 
   ports:
     otlp:

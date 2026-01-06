@@ -1,0 +1,66 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  batch/traces:
+    timeout: 10s
+    send_batch_size: 1024
+
+  batch/metrics:
+    timeout: 30s
+    send_batch_size: 1000
+
+connectors:
+  servicegraph:
+    latency_histogram_buckets: [2ms, 4ms, 6ms, 8ms, 10ms, 50ms, 100ms, 200ms, 400ms, 800ms, 1s, 1400ms, 2s, 5s, 10s, 15s]
+    dimensions:
+      - http.method
+      - http.status_code
+      - rpc.grpc.status_code
+    store:
+      ttl: 2s
+      max_items: 10000
+    cache_loop: 60m
+    store_expiration_loop: 10s
+
+exporters:
+  otlp/traces:
+    endpoint: vtinsert:4317
+    tls:
+      insecure: true
+
+  otlp/metrics:
+    endpoint: vmadapter:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch/traces]
+      exporters: [servicegraph, otlp/traces]
+
+    metrics/servicegraph:
+      receivers: [servicegraph]
+      processors: [batch/metrics]
+      exporters: [otlp/metrics]
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888

@@ -1,0 +1,40 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  batch:
+    timeout: 1s
+    send_batch_size: 10000
+
+exporters:
+  otlphttp/victorialogs:
+    endpoint: http://vlinsert:8429/insert/opentelemetry/v1/logs
+    tls:
+      insecure: true
+    compression: gzip
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/victorialogs]
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888
